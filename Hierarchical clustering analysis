@@ -1,0 +1,19 @@
+library(tidyverse)
+data %>% unique() %>% spread(Tissue, Value) -> data.spread
+rownames(data.spread) <- data.spread$Transcript
+data.spread[,-1] %>% data.matrix() %>% t() %>%
+  dist(method = 'euclidean') %>% hclust(method = 'average') -> my.clusters
+my.clusters %>% plot()
+my.clusters %>% as.dendrogram()-> dend
+par(cex=1.2, mar=c(2, 0, 0, 15))
+plot(dend, horiz = T)
+p1 <- recordPlot()
+data$Tissue <- factor(data$Tissue, levels = labels(dend))
+library(RColorBrewer)
+p2 <- ggplot(data, aes(fill=Transcript, y=Value, x=Tissue)) +
+  geom_bar( stat="identity", position="fill") + scale_fill_brewer(palette = "Spectral") + coord_flip()
+p3 <- p2+theme(axis.text=element_text(size=12),
+               axis.title=element_text(size=14,face="bold"))
+library(cowplot)
+plot_grid (p1, p3)
+clusters.6 = cutree(my.clusters,6)
