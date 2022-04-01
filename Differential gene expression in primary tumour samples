@@ -1,0 +1,57 @@
+library (tidyverse)
+tumour <- data.frame(read.table('HiSeqV2 colon',header = TRUE, sep = "\t"), row.names = 1)
+data <- data.matrix(tumour)
+# Select primary tumour samples
+primary.samples <- read_tsv(file.choose())
+primary.samples.IDs <- primary.samples$sample
+tumour <- tumour %>% select (c(primary.samples.IDs))
+# Select groups based on DMD gene expression
+dmd <- tumour %>% filter(row.names(tumour) %in% "DMD") %>% t() %>% as.data.frame()
+high.dmd <- dmd %>% top_frac(.33)
+high.dmd.IDs <- rownames(high.dmd)
+low.dmd <- dmd %>% top_frac(-.33)
+low.dmd.IDs <- rownames(low.dmd)
+dmd <- as.data.frame(t(dmd))
+medium.dmd <- dmd[ , !(colnames(dmd) %in% high.dmd.IDs)] %>% as.data.frame()
+medium.dmd <- medium.dmd [ , !(colnames(medium.dmd) %in% low.dmd.IDs)] %>% t() %>% as.data.frame()
+medium.dmd.IDs <- rownames(medium.dmd)
+sample.names <- colnames(data) %>% as.data.frame()
+colnames(sample.names) = "sample"
+sample.names$groups[sample.names$sample %in% high.dmd.IDs] <- 'high'
+sample.names$groups[sample.names$sample %in% medium.dmd.IDs] <- 'medium'
+sample.names$groups[sample.names$sample %in% low.dmd.IDs] <- 'low'
+# ANOVA and FDR correction
+stat.one.way <- function(data, groups)
+  unlist(summary(aov(data ~ groups)))
+# Apply the previous function to the whole data matrix
+apply(data,
+      1,
+      stat.one.way,
+      groups=sample.names$groups) %>% t() %>% data.frame() -> results
+results$Pr..F.1 %>% p.adjust(., method = 'fdr') -> results$fdr
+fdr.significant.genes <- filter(results, fdr<0.1)
+fdr.significant.genes.IDs <- rownames(fdr.significant.genes) %>% as.data.frame()
+# Post hoc T tests
+posthoc <- function(x, y) {
+  unlist(pairwise.t.test(x, g = sample.names$groups, p.adjust.method = 'bonferroni'))[c(3,4,6)]}
+apply(data,
+      1,
+      posthoc) %>% t()  %>% data.frame() %>% select(p.value1) -> posthoc_results
+posthoc_results <- as.numeric(posthoc_results$p.value1)
+posthoc_results <- as.data.frame(posthoc_results)
+rownames(posthoc_results) <- rownames(tumour)
+bonferroni.significant.genes <- filter(posthoc_results, posthoc_results < 0.05)
+bonferroni.significant.genes.IDs <- rownames(bonferroni.significant.genes) %>% as.data.frame()
+# Select genes with FDR & Bonferroni significant results
+significant.genes <- bonferroni.significant.genes.IDs[bonferroni.significant.genes.IDs$. %in% fdr.significant.genes.IDs$.,]
+# Calculating LogFC
+group.high.dmd <- tumour %>% select (c(high.dmd.IDs)) %>% t() %>% as.data.frame()
+group.high.dmd <- group.high.dmd %>% select (c(significant.genes)) %>% t() %>% as.data.frame()
+group.low.dmd <- tumour %>% select (c(low.dmd.IDs)) %>% t() %>% as.data.frame()
+group.low.dmd <- group.low.dmd %>% select (c(significant.genes)) %>% t() %>% as.data.frame()
+mean.high.dmd <- rowMeans(group.high.dmd) %>% as.data.frame()
+mean.low.dmd <- rowMeans(group.low.dmd) %>% as.data.frame()
+logfc <- mean.low.dmd - mean.high.dmd
+downregulated.genes <- filter(logfc, . <= -0.5) %>% as.data.frame()
+# Upregulated genes in the group with low DMD
+upregulated.genes <- filter(logfc, . >= 0.5) %>% as.data.frame()
